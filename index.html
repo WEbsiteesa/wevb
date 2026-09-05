@@ -1246,7 +1246,13 @@
       d.addEventListener("input",e=>{
         if(s.won) return;
         if(d.readOnly){ d.value=isLocked(L,i)?CODE[i]:d.value; return; }
-        if(e.isComposing || d.dataset.composing==="1") return;  // let an IME finish before judging
+        // Deliberately NOT gated on `isComposing`. Android's predictive keyboards
+        // (Gboard and friends) raise composition events for ordinary Latin typing,
+        // and in a maxlength="1" box `compositionend` never arrives — gating here
+        // left every character sitting in the slot unjudged, which broke the game
+        // outright on phones. These slots take one ASCII character, so judging
+        // immediately is right; a composing IME is not a case worth breaking
+        // mobile for.
         if(s.busy[i]) return;                 // reject flash in progress; ignore input, keep keyboard up
         const chars=[...d.value];             // split by code point, not code unit,
         const ch=chars.length?chars[chars.length-1]:"";   // so an emoji stays whole
@@ -1254,11 +1260,6 @@
         if(!ch){ tock(); vibe(6); return; }   // deleted -> delete sound
         tick();
         handleChar(L,i,ch);
-      });
-      d.addEventListener("compositionstart",()=>{ d.dataset.composing="1"; });
-      d.addEventListener("compositionend",()=>{
-        d.dataset.composing="0";
-        d.dispatchEvent(new Event("input",{bubbles:true}));   // judge the finished character
       });
       d.addEventListener("keydown",e=>{
         // A dead slot is only revivable through the dialog, which used to open
