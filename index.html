@@ -418,6 +418,17 @@
   .hud .noise b{color:var(--warn);}
   .hud .sep{opacity:.4;}
 
+  .reset{
+    margin-top:8px; padding:5px 12px; border-radius:3px; cursor:pointer;
+    font-family:"Consolas",ui-monospace,monospace;
+    font-size:10.5px; letter-spacing:.14em; text-transform:uppercase;
+    color:#8a9098; background:transparent; border:1px solid #ffffff1c;
+    transition:color .2s, border-color .2s;
+  }
+  .reset:hover{color:var(--red-hot); border-color:var(--red);}
+  .reset.arm{color:#fff; background:var(--red-deep); border-color:var(--red-hot);}
+  #resetWin{margin-top:14px;}
+
   .tail{
     padding:24px 0 40px; font-family:"Consolas",ui-monospace,monospace;
     font-size:11px; letter-spacing:.12em; color:#ff9ea2; opacity:.8;
@@ -615,6 +626,7 @@
       <p class="intro">One key unlocks all three blocks below. Work down the page —
         <b>each block gives you less</b> than the one above it.</p>
       <div class="progress" id="progress">0 of 3 blocks unlocked</div>
+      <button class="reset" id="resetBtn" type="button">reset progress</button>
     </div>
 
     <!-- the three level blocks are built by the script, here -->
@@ -630,6 +642,7 @@
     <div class="wintitle">ACCESS GRANTED</div>
     <div class="winsub">all three blocks unlocked</div>
     <button id="winBack" type="button">Back to the console</button>
+    <button class="reset" id="resetWin" type="button">reset progress</button>
   </div>
 
   <div class="shockwave" id="shock"></div>
@@ -642,7 +655,7 @@
     <div class="modal" id="modalbox" role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1">
       <div class="mark sm" data-mark></div>
       <h2 id="modalTitle"><span id="lockLevel">EASY</span> :: SLOT <b id="lockNum">1</b> LOCKED OUT</h2>
-      <p>Ten bad characters — the slot threw a fatal and shut itself down.<br/>Enter the override key to restore it.</p>
+      <p>Too many bad characters — the slot threw a fatal and shut itself down.<br/>Enter the override key to restore it.</p>
       <input id="override" maxlength="3" inputmode="text" autocapitalize="characters"
              autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="go"
              placeholder="•••" aria-label="override key"/>
@@ -662,7 +675,11 @@
      ============================================================ */
   const CODE          = "#BCA26";   // the key, same for every block
   const OVERRIDE_CODE = "BAC";      // restores a locked-out slot
-  const TRIES_MAX     = 10;         // bad characters allowed per slot
+  const TRIES_MAX     = 5;          // bad characters allowed per slot
+  /* (1) anti-spam: each wrong character freezes the WHOLE block, and the freeze
+     grows the longer someone sits there guessing. Freezing only the one slot
+     was useless — you could just hop to the next slot and keep hammering. */
+  const HOLD_MS       = [600, 1500, 3000, 6000, 10000];
 
   /* HARD: every glyph sits one step AHEAD of the answer.
      4→3→the symbol above the 3 key (#) · C→B · D→C · B→A · 3→2 · 7→6 */
@@ -871,6 +888,8 @@
       locked:[false,false,false,false,false,false],
       busy:[false,false,false,false,false,false],   // frozen during a reject flash
       flashT:[null,null,null,null,null,null],       // pending reject-flash timer, so a latch can cancel it
+      streak:0,          // consecutive wrong characters, drives the escalating freeze
+      holdUntil:0,       // whole block refuses input until this timestamp
       misses:0, won:false
     };
   }
@@ -884,7 +903,7 @@
   /* ================= PERSISTENCE =================
      Progress lives in localStorage, so a reload (or leaving and coming back)
      does NOT hand out fresh tries. Bump SAVE_KEY if you change CODE. */
-  const SAVE_KEY="codex-save-v1";
+  const SAVE_KEY="codex-save-v2";
   function saveState(){
     try{
       const out={};
@@ -1116,6 +1135,7 @@
     if(s.won || s.locked[i] || s.dead[i]) return;
     if(s.flashT[i]!==null){ clearTimeout(s.flashT[i]); s.flashT[i]=null; }
     s.busy[i]=false;
+    s.streak=0; s.holdUntil=0;      // solving resets the anti-spam ladder
     s.locked[i]=true;
     d.value=CODE[i];
     d.readOnly=true;
@@ -1159,6 +1179,7 @@
     s.dead[i]=false;
     s.busy[i]=false;
     s.locked[i]=false;              // a revived slot is open again, never still counted as latched
+    s.streak=0; s.holdUntil=0;
     s.tries[i]=TRIES_MAX;
     d.readOnly=false;
     d.classList.remove("fried","locked","wrong");
@@ -1179,6 +1200,8 @@
     if(s.won || s.locked[i] || s.dead[i] || s.busy[i] || s.tries[i]<=0) return;
     s.misses++;
     s.tries[i]--;
+    s.streak++;
+    s.holdUntil = Date.now() + HOLD_MS[Math.min(s.streak-1, HOLD_MS.length-1)];
     updateHUD(L);
     buzz(); vibe([40,30,40]);
     d.classList.remove("wrong"); void d.offsetWidth; d.classList.add("wrong");
@@ -1254,6 +1277,13 @@
         // immediately is right; a composing IME is not a case worth breaking
         // mobile for.
         if(s.busy[i]) return;                 // reject flash in progress; ignore input, keep keyboard up
+        const wait = s.holdUntil - Date.now();
+        if(wait > 0){                         // block is cooling down after a wrong guess
+          d.value="";
+          buzz(); vibe(20);
+          showToast("[HOLD] "+LEVEL_NAME[L].toLowerCase()+" is cooling down — <b>"+Math.ceil(wait/1000)+"s</b>");
+          return;
+        }
         const chars=[...d.value];             // split by code point, not code unit,
         const ch=chars.length?chars[chars.length-1]:"";   // so an emoji stays whole
         d.value=ch;
@@ -1292,6 +1322,11 @@
         if(s.won) return;
         const cb=e.clipboardData||window.clipboardData;
         if(!cb) return;
+        if(s.holdUntil - Date.now() > 0){
+          buzz();
+          showToast("[HOLD] "+LEVEL_NAME[L].toLowerCase()+" is cooling down — <b>"+Math.ceil((s.holdUntil-Date.now())/1000)+"s</b>");
+          return;
+        }
         let text="";
         try{ text=(cb.getData("text")||"").toUpperCase().replace(/\s/g,""); }catch(err){ return; }
         if(!text) return;
@@ -1491,6 +1526,45 @@
       setTimeout(()=>s.remove(), 2800);
     }
   }
+
+  /* ================= RESET =================
+     Progress is saved per browser, so a finished board keeps showing as finished
+     until it is cleared. Two taps: the first arms, the second wipes. */
+  const resetBtns=[document.getElementById("resetBtn"), document.getElementById("resetWin")];
+  let armed=false, armT=null;
+  function disarm(){
+    armed=false; clearTimeout(armT);
+    resetBtns.forEach(b=>{ b.classList.remove("arm"); b.textContent="reset progress"; });
+  }
+  function doReset(){
+    disarm();
+    try{ localStorage.removeItem(SAVE_KEY); }catch(e){}
+    LEVELS.forEach(L=>{
+      const s=state[L], f=freshLevel();
+      s.tries=f.tries; s.dead=f.dead; s.locked=f.locked; s.busy=f.busy;
+      s.flashT.forEach((t,i)=>{ if(t!==null) clearTimeout(t); s.flashT[i]=null; });
+      s.streak=0; s.holdUntil=0; s.misses=0; s.won=false;
+    });
+    closeModal(false);
+    win.classList.remove("show");
+    flash.classList.remove("go");
+    shock.classList.remove("go");
+    parts.length=0;                        // drop any confetti still in flight
+    renderAll();
+    saveState();
+    restore(); vibe([0,25,40,25]);
+    showToast("[OK] progress wiped — <b>all three blocks are locked again</b>","good");
+    deck.scrollTop=0;
+    const n=firstOpenAnywhere();
+    if(n) n.focus({preventScroll:true});
+  }
+  resetBtns.forEach(b=>b.addEventListener("click",()=>{
+    if(armed){ doReset(); return; }
+    armed=true;
+    resetBtns.forEach(x=>{ x.classList.add("arm"); x.textContent="tap again to wipe"; });
+    tick(); vibe(10);
+    clearTimeout(armT); armT=setTimeout(disarm, 4000);   // un-arm if they walk away
+  }));
 
   /* first paint */
   renderAll();
