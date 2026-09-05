@@ -623,8 +623,8 @@
    <div class="deck-inner">
     <div class="masthead">
       <div class="mark sm" data-mark></div>
-      <p class="intro">One key unlocks all three blocks below. Work down the page —
-        <b>each block gives you less</b> than the one above it.</p>
+      <p class="intro">Three blocks, <b>three different keys</b>. Work down the page —
+        each one gives you less than the block above it.</p>
       <div class="progress" id="progress">0 of 3 blocks unlocked</div>
       <button class="reset" id="resetBtn" type="button">reset progress</button>
     </div>
@@ -673,28 +673,36 @@
      All three blocks unlock with the same 6-character key; only the
      help you are given changes as you go down the page.
      ============================================================ */
-  const CODE          = "#BCA26";   // the key, same for every block
+  /* One key per block now — and the number of slots follows the key's length,
+     so HARD is a 5-slot block. */
+  const KEYS = {
+    easy:   "#BCA26",
+    medium: "/ACB62",
+    hard:   "DOECX"      // an anagram of CODEX
+  };
+  const SLOTS = L => KEYS[L].length;
   const OVERRIDE_CODE = "BAC";      // restores a locked-out slot
   const TRIES_MAX     = 5;          // bad characters allowed per slot
   /* (1) anti-spam: each wrong character freezes the WHOLE block, and the freeze
      grows the longer someone sits there guessing. Freezing only the one slot
      was useless — you could just hop to the next slot and keep hammering. */
-  const HOLD_MS       = [600, 1500, 3000, 6000, 10000];
+  const HOLD_MS       = [300, 700, 1200, 2000, 3000];
 
-  /* HARD: every glyph sits one step AHEAD of the answer.
-     4→3→the symbol above the 3 key (#) · C→B · D→C · B→A · 3→2 · 7→6 */
-  const HARD_CIPHER = ["4","C","D","B","3","7"];
+  /* HARD: a progressive Caesar. Each letter of DOECX was pushed FORWARD by its
+     own position, wrapping past Z:
+       D+1=E · O+2=Q · E+3=H · C+4=G · X+5=C  (X→Y→Z→A→B→C) */
+  const HARD_CIPHER = ["E","Q","H","G","C"];
 
   /* MEDIUM: one clue per slot. These deliberately can't be looked up —
      each one is answered by reasoning about this key and this page, and
      clues 1 and 5 lean on what clue 2 tells you. */
   const MEDIUM_CLUES = [
-    "I am the odd one out — not a letter, not a digit. Count the letters in this key, find the number key that matches that count, and take the symbol printed above it.",
-    "Three of these six are letters, and they are the alphabet's first three, shuffled. I am the middle one alphabetically — and the first of the three you reach.",
-    "Of those same three letters, I am the last alphabetically, and I sit between the other two.",
-    "Of those same three letters, I am the first alphabetically, and the last one you reach.",
-    "Six characters. Three are letters, one is the odd one out. Whatever is left over — that count is me.",
-    "Count the slots in this row. That count is me."
+    "I am the odd one out — not a letter, not a digit. Look for the key that carries the question mark; I am what it types when you do not press shift.",
+    "Three of these six are letters, and they are the alphabet's first three, shuffled. I am the first of those three alphabetically — and also the first one you reach.",
+    "Of those same three letters, I am the last alphabetically, and I sit in the middle of them.",
+    "Of those same three letters, I am the middle one alphabetically, and the last one you reach.",
+    "Count the slots in this row. That count is me.",
+    "Six characters. Three are letters, one is the odd one out. Whatever is left over — that count is me."
   ];
 
   const LEVELS = ["easy","medium","hard"];
@@ -881,20 +889,21 @@
   muteBtn.addEventListener("pointerdown", e=>e.stopPropagation());
 
   /* ================= GAME STATE (one set per block) ================= */
-  function freshLevel(){
+  function freshLevel(L){
+    const n=SLOTS(L);
     return {
-      tries:[TRIES_MAX,TRIES_MAX,TRIES_MAX,TRIES_MAX,TRIES_MAX,TRIES_MAX],
-      dead:[false,false,false,false,false,false],
-      locked:[false,false,false,false,false,false],
-      busy:[false,false,false,false,false,false],   // frozen during a reject flash
-      flashT:[null,null,null,null,null,null],       // pending reject-flash timer, so a latch can cancel it
+      tries:Array(n).fill(TRIES_MAX),
+      dead:Array(n).fill(false),
+      locked:Array(n).fill(false),
+      busy:Array(n).fill(false),                    // frozen during a reject flash
+      flashT:Array(n).fill(null),                   // pending reject-flash timer, so a latch can cancel it
       streak:0,          // consecutive wrong characters, drives the escalating freeze
       holdUntil:0,       // whole block refuses input until this timestamp
       misses:0, won:false
     };
   }
   const state={}, ui={};
-  LEVELS.forEach(L=>{ state[L]=freshLevel(); });
+  LEVELS.forEach(L=>{ state[L]=freshLevel(L); });
 
   const isLocked  = (L,i) => state[L].locked[i];
   const isBlocked = (L,i) => state[L].locked[i] || state[L].dead[i];
@@ -903,7 +912,7 @@
   /* ================= PERSISTENCE =================
      Progress lives in localStorage, so a reload (or leaving and coming back)
      does NOT hand out fresh tries. Bump SAVE_KEY if you change CODE. */
-  const SAVE_KEY="codex-save-v2";
+  const SAVE_KEY="codex-save-v3";
   function saveState(){
     try{
       const out={};
@@ -921,8 +930,8 @@
     if(!st) return;
     LEVELS.forEach(L=>{
       const src=st[L], dst=state[L];
-      if(!src || !Array.isArray(src.tries) || src.tries.length!==6) return;
-      for(let k=0;k<6;k++){
+      if(!src || !Array.isArray(src.tries) || src.tries.length!==SLOTS(L)) return;
+      for(let k=0;k<SLOTS(L);k++){
         dst.tries[k]=Math.max(0, Math.min(TRIES_MAX, src.tries[k]|0));
         dst.dead[k]=!!(src.dead && src.dead[k]);
         dst.locked[k]=!!(src.locked && src.locked[k]);
@@ -964,12 +973,14 @@
              MEDIUM_CLUES.map((c,i)=>'<li class="clue" data-i="'+i+'"><i>'+(i+1)+'</i><span>'+c+'</span></li>').join("")+
              '</ul>';
     }
-    return '<p class="clue-body">We pulled the key off the wire, but it came through shifted. '+
-           '<em>Every glyph sits one step ahead of the truth.</em></p>'+
+    return '<p class="clue-body">Five letters this time, and the drift got worse down the line. '+
+           '<em>Each letter ran ahead by its own position.</em></p>'+
            stripHTML(HARD_CIPHER)+
-           '<p class="clue-body">Walk each one back by a single step: a letter becomes the letter '+
-           'before it, a digit becomes the digit before it. The first one lands on a digit — '+
-           'take the <b>symbol printed above that key</b> instead.</p>';
+           '<p class="clue-body">The 1st letter ran ahead by one, the 2nd by two, the 3rd by three, '+
+           'and so on. Walk each one <b>back by its own position number</b>. '+
+           'The alphabet wraps, so stepping back past A lands on Z.</p>'+
+           '<p class="clue-body">What comes out is not a word — but every letter in it '+
+           'should look familiar.</p>';
   }
 
   /* ================= BUILD THE THREE BLOCKS ================= */
@@ -981,11 +992,11 @@
     sec.innerHTML=
       '<div class="lv-head">'+
         '<span class="lv-name">'+LEVEL_NAME[L]+' <i>'+LEVEL_TAG[L]+'</i></span>'+
-        '<span class="lv-badge">0/6</span>'+
+        '<span class="lv-badge">0/'+SLOTS(L)+'</span>'+
       '</div>'+
       '<div class="lv-clue">'+clueHTML(L)+'</div>'+
       '<div class="slot-row">'+
-        [0,1,2,3,4,5].map(i=>
+        Array.from({length:SLOTS(L)},(_,i)=>i).map(i=>
           '<div class="cell">'+
             '<input class="slot" inputmode="text" autocapitalize="characters" maxlength="1" '+
               'autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="next" '+
@@ -994,7 +1005,7 @@
           '</div>').join("")+
       '</div>'+
       '<div class="hud">'+
-        '<span>latched <b class="lv-locked">0/6</b></span>'+
+        '<span>latched <b class="lv-locked">0/'+SLOTS(L)+'</b></span>'+
         '<span class="sep">::</span>'+
         '<span class="noise">errors <b class="lv-noise">0</b></span>'+
       '</div>';
@@ -1024,11 +1035,11 @@
   }
   function updateHUD(L){
     const s=state[L], n=lockedTotal(L);
-    ui[L].locked.textContent=n+"/6";
+    ui[L].locked.textContent=n+"/"+SLOTS(L);
     ui[L].noise.textContent=String(s.misses);
-    ui[L].badge.textContent = s.won ? "UNLOCKED" : n+"/6";
+    ui[L].badge.textContent = s.won ? "UNLOCKED" : n+"/"+SLOTS(L);
     ui[L].sec.classList.toggle("solved", s.won);
-    for(let i=0;i<6;i++) updatePill(L,i);
+    for(let i=0;i<SLOTS(L);i++) updatePill(L,i);
     ui[L].clues.forEach(el=>el.classList.toggle("done", s.locked[+el.dataset.i]));
   }
   function updateProgress(){
@@ -1042,7 +1053,7 @@
         d.classList.remove("locked","fried","wrong");
         d.readOnly=false; d.value=""; s.busy[i]=false;
         if(s.flashT[i]!==null){ clearTimeout(s.flashT[i]); s.flashT[i]=null; }
-        if(s.locked[i]){ d.value=CODE[i]; d.readOnly=true; d.classList.add("locked"); }
+        if(s.locked[i]){ d.value=KEYS[L][i]; d.readOnly=true; d.classList.add("locked"); }
         else if(s.dead[i]){ d.readOnly=true; d.classList.add("fried"); }
       });
       updateHUD(L);
@@ -1082,7 +1093,7 @@
 
   /* next usable slot inside one block */
   function nextOpenSlot(L,from){
-    for(let k=from;k<6;k++) if(!isBlocked(L,k)) return ui[L].slots[k];
+    for(let k=from;k<SLOTS(L);k++) if(!isBlocked(L,k)) return ui[L].slots[k];
     for(let k=0;k<from;k++) if(!isBlocked(L,k)) return ui[L].slots[k];
     return null;
   }
@@ -1137,7 +1148,7 @@
     s.busy[i]=false;
     s.streak=0; s.holdUntil=0;      // solving resets the anti-spam ladder
     s.locked[i]=true;
-    d.value=CODE[i];
+    d.value=KEYS[L][i];
     d.readOnly=true;
     d.classList.remove("wrong");
     d.classList.add("locked");
@@ -1145,8 +1156,8 @@
     burstAt(d);
     updateHUD(L);
     saveState();
-    if(lockedTotal(L)===6){ levelSolved(L); return; }
-    if(lockedTotal(L)===5) showToast("<b>one more</b> :: "+LEVEL_NAME[L].toLowerCase()+" is about to give","good");
+    if(lockedTotal(L)===SLOTS(L)){ levelSolved(L); return; }
+    if(lockedTotal(L)===SLOTS(L)-1) showToast("<b>one more</b> :: "+LEVEL_NAME[L].toLowerCase()+" is about to give","good");
     const nxt=nextOpenSlot(L,i+1);
     if(nxt) nxt.focus({preventScroll:true});
   }
@@ -1241,7 +1252,7 @@
   function handleChar(L,i,raw){
     const ch=raw.toUpperCase();
     if(!ch.trim()){ ui[L].slots[i].value=""; return; }
-    if(ch===CODE[i].toUpperCase()) lockSlot(L,i);
+    if(ch===KEYS[L][i].toUpperCase()) lockSlot(L,i);
     else wrongEntry(L,i,ch);
   }
 
@@ -1268,7 +1279,7 @@
       d.addEventListener("pointercancel",()=>{ pdOn=false; });
       d.addEventListener("input",e=>{
         if(s.won) return;
-        if(d.readOnly){ d.value=isLocked(L,i)?CODE[i]:d.value; return; }
+        if(d.readOnly){ d.value=isLocked(L,i)?KEYS[L][i]:d.value; return; }
         // Deliberately NOT gated on `isComposing`. Android's predictive keyboards
         // (Gboard and friends) raise composition events for ordinary Latin typing,
         // and in a maxlength="1" box `compositionend` never arrives — gating here
@@ -1312,7 +1323,7 @@
         // it can do nothing
         if(e.key==="ArrowLeft"||e.key==="ArrowRight"){
           const step = e.key==="ArrowLeft" ? -1 : 1;
-          for(let k=i+step; k>=0 && k<6; k+=step){
+          for(let k=i+step; k>=0 && k<SLOTS(L); k+=step){
             if(!isBlocked(L,k)){ e.preventDefault(); ui[L].slots[k].focus(); break; }
           }
         }
@@ -1332,9 +1343,9 @@
         if(!text) return;
         let j=i;
         for(const ch of text){
-          while(j<6 && isBlocked(L,j)) j++;
-          if(j>5) break;
-          if(ch===CODE[j].toUpperCase()){ lockSlot(L,j); if(s.won) return; j++; }
+          while(j<SLOTS(L) && isBlocked(L,j)) j++;
+          if(j>=SLOTS(L)) break;
+          if(ch===KEYS[L][j].toUpperCase()){ lockSlot(L,j); if(s.won) return; j++; }
           else { wrongEntry(L,j,ch); return; }
         }
       });
@@ -1540,7 +1551,7 @@
     disarm();
     try{ localStorage.removeItem(SAVE_KEY); }catch(e){}
     LEVELS.forEach(L=>{
-      const s=state[L], f=freshLevel();
+      const s=state[L], f=freshLevel(L);
       s.tries=f.tries; s.dead=f.dead; s.locked=f.locked; s.busy=f.busy;
       s.flashT.forEach((t,i)=>{ if(t!==null) clearTimeout(t); s.flashT[i]=null; });
       s.streak=0; s.holdUntil=0; s.misses=0; s.won=false;
