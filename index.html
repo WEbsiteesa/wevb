@@ -328,7 +328,6 @@
     color:var(--paper); background:#ffffff08;
     border:1px dashed #ffffff2b; border-radius:3px;
   }
-  .strip.answer span{color:var(--ok); border-color:#35e07e66; border-style:solid; background:#35e07e0f;}
 
   .clue-list{margin:10px 0 0; padding:0; list-style:none; display:grid; gap:7px;}
   .clue{
@@ -683,7 +682,7 @@
 
   const LEVELS = ["easy","medium","hard"];
   const LEVEL_NAME = {easy:"Easy", medium:"Medium", hard:"Hard"};
-  const LEVEL_TAG  = {easy:"plaintext", medium:"6 clues", hard:"encrypted"};
+  const LEVEL_TAG  = {easy:"key only", medium:"6 linked clues", hard:"encrypted"};
 
   const REDUCE = matchMedia("(prefers-reduced-motion: reduce)").matches;
   function vibe(p){ if(navigator.vibrate){ try{ navigator.vibrate(p); }catch(e){} } }
@@ -934,13 +933,13 @@
   }
   function clueHTML(L){
     if(L==="easy"){
-      return '<p class="clue-body">No tricks in this block. Here is the whole key — '+
-             'type it into the six slots below, left to right.</p>'+
-             stripHTML(CODE.split(""), "answer");
+      // No hints and no key: this block is for someone who already has it.
+      return '<p class="clue-body">Straight in. If you already have the key, '+
+             'type it into the six slots below, left to right.</p>';
     }
     if(L==="medium"){
-      return '<p class="clue-body">The key is withheld. Each clue points at <b>one character</b>, '+
-             'and some of them lean on the others — start with clue 2. '+
+      return '<p class="clue-body">Six clues again — but these <em>lean on each other</em>, '+
+             'and none of them can be looked up. Start with clue 2. '+
              'A clue dims once its slot latches.</p>'+
              '<ul class="clue-list">'+
              MEDIUM_CLUES.map((c,i)=>'<li class="clue" data-i="'+i+'"><i>'+(i+1)+'</i><span>'+c+'</span></li>').join("")+
